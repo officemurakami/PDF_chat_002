@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 # --- ページ設定とUI非表示 ---
 st.set_page_config(
     page_title="業務分類QAボット（Drive連携）",
-    page_icon="\ud83d\udcc4",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="collapsed",
     menu_items={"Get Help": None, "Report a bug": None, "About": None}
