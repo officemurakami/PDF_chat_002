@@ -54,15 +54,22 @@ def ask_gemini_about_pdf(text, question):
         return res.json()['candidates'][0]['content']['parts'][0]['text']
     else:
         return f"\u274c エラー: {res.status_code} - {res.text}"
+from googleapiclient.errors import HttpError  # ← ファイルの上部（import群）に追加されていない場合はここも忘れずに！
 
 # --- DriveからPDF一覧取得 ---
 FOLDER_ID = "1l7ux1L_YCMHY1Jt-AlLci88Bh3Fcv_-m"  # ★DriveのフォルダIDをここに設定
 query = f"'{FOLDER_ID}' in parents and mimeType='application/pdf'"
-results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-pdf_files = results.get("files", [])
+
+try:
+    results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+    pdf_files = results.get("files", [])
+except HttpError as e:
+    st.error(f"❌ Google Drive API エラーが発生しました：{e}")
+    st.stop()
 
 file_names = [f["name"] for f in pdf_files]
-selected_name = st.selectbox("\ud83d\udcc1 Google DriveのPDFファイルを選択", file_names)
+selected_name = st.selectbox("📂 Google DriveのPDFファイルを選択", file_names)
+names)
 
 # --- ダウンロード関数 ---
 def download_pdf_from_drive(file_id, save_path):
