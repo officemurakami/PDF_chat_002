@@ -56,7 +56,7 @@ except HttpError as e:
 if not pdf_files:
     st.warning("\ud83d\udcc2 フォルダー内にPDFが見つかりませんでした。")
 else:
-    st.markdown("### \ud83d\udcc4 フォルダー内PDF一覧")
+    st.markdown("### フォルダー内PDF一覧")
     for f in pdf_files:
         st.markdown(f"- {f['name']}")
 
