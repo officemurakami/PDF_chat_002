@@ -37,9 +37,7 @@ import json
 
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 info = st.secrets["service_account"]
-credentials = service_account.Credentials.from_service_account_info(
-    json.loads(str(info)), scopes=SCOPES
-)
+credentials = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
 
 drive_service = build("drive", "v3", credentials=credentials)
 
