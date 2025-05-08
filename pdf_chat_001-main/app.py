@@ -1,19 +1,22 @@
 import streamlit as st
 import requests
 import fitz  # PyMuPDF
-from dotenv import load_dotenv
 import os
+import io
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from googleapiclient.http import MediaIoBaseDownload
+from dotenv import load_dotenv
 
 # --- ページ設定とUI非表示 ---
 st.set_page_config(
-    page_title="業務分類QAボット",
-    page_icon="📄",
+    page_title="業務分類QAボット（Drive連携）",
+    page_icon="\ud83d\udcc4",
     layout="wide",
     initial_sidebar_state="collapsed",
     menu_items={"Get Help": None, "Report a bug": None, "About": None}
 )
 
-# --- CSSでUI非表示 ---
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -23,10 +26,18 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 環境変数の読み込み ---
+# --- 認証とAPIキー読み込み ---
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key={API_KEY}"
+
+# --- Google Drive 認証 ---
+SERVICE_ACCOUNT_FILE = "service_account.json"
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+credentials = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES
+)
+drive_service = build("drive", "v3", credentials=credentials)
 
 # --- PDFからテキスト抽出 ---
 def extract_text_from_pdf(pdf_path):
@@ -44,52 +55,62 @@ def ask_gemini_about_pdf(text, question):
     if res.status_code == 200:
         return res.json()['candidates'][0]['content']['parts'][0]['text']
     else:
-        return f"❌ エラー: {res.status_code} - {res.text}"
+        return f"\u274c エラー: {res.status_code} - {res.text}"
 
-# --- タイトル ---
-st.title("📄 業務分類QAボット")
+# --- DriveからPDF一覧取得 ---
+FOLDER_ID = "1l7ux1L_YCMHY1Jt-AlLci88Bh3Fcv_-m"  # ★DriveのフォルダIDをここに設定
+query = f"'{FOLDER_ID}' in parents and mimeType='application/pdf'"
+results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+pdf_files = results.get("files", [])
+
+file_names = [f["name"] for f in pdf_files]
+selected_name = st.selectbox("\ud83d\udcc1 Google DriveのPDFファイルを選択", file_names)
+
+# --- ダウンロード関数 ---
+def download_pdf_from_drive(file_id, save_path):
+    request = drive_service.files().get_media(fileId=file_id)
+    fh = io.FileIO(save_path, "wb")
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+
+# --- 選択ファイル取得 ---
+selected_file = next(f for f in pdf_files if f["name"] == selected_name)
+local_pdf_path = f"/tmp/{selected_file['name']}"
+if "pdf_text" not in st.session_state or st.session_state.get("last_file") != selected_name:
+    download_pdf_from_drive(selected_file["id"], local_pdf_path)
+    st.session_state["pdf_text"] = extract_text_from_pdf(local_pdf_path)
+    st.session_state["last_file"] = selected_name
 
 # --- セッション初期化（PDFは保持） ---
 for key in ["question", "answer"]:
     if key not in st.session_state:
         st.session_state[key] = ""
 
-# --- PDFを1回だけ読み込み ---
-pdf_path = "sample.pdf"
-if "pdf_text" not in st.session_state:
-    try:
-        st.session_state["pdf_text"] = extract_text_from_pdf(pdf_path)
-    except Exception as e:
-        st.error(f"PDFの読み込み中にエラーが発生しました：{e}")
-        st.stop()
-
 # --- フォーム（質問） ---
 with st.form("qa_form"):
     question = st.text_input("質問を入力してください", value=st.session_state["question"])
-    submitted = st.form_submit_button("💬 質問する")
+    submitted = st.form_submit_button("\ud83d\udcac 質問する")
 
     if submitted and question:
         st.session_state["question"] = question
-        with st.spinner("⌛ 回答を考えています..."):
+        with st.spinner("\u231b 回答を考えています..."):
             st.session_state["answer"] = ask_gemini_about_pdf(
                 st.session_state["pdf_text"], question
             )
 
-# --- 回答表示（実行後のみ） ---
+# --- 回答表示 ---
 if st.session_state["answer"] and st.session_state["question"]:
     st.markdown("### 回答：")
     st.write(st.session_state["answer"])
-
-    # --- ボタン列 ---
     col1, col2 = st.columns(2)
-
     with col1:
-        if st.button("🧹 回答クリア"):
+        if st.button("\ud83e\ude79 回答クリア"):
             st.session_state["answer"] = ""
             st.rerun()
-
     with col2:
-        if st.button("🔁 初期化（PDFは残す）"):
+        if st.button("\ud83d\udd01 初期化（PDFは残す）"):
             for key in ["question", "answer"]:
                 if key in st.session_state:
                     del st.session_state[key]
