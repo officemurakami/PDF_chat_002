@@ -100,14 +100,8 @@ if st.session_state.get("answer") and st.session_state.get("question"):
     st.markdown("### 回答：")
     st.write(st.session_state["answer"])
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("回答クリア"):
-            st.session_state["answer"] = ""
-            st.rerun()
-    with col2:
-        if st.button("初期化（PDFは残す）"):
-            for key in ["question", "answer"]:
-                if key in st.session_state:
-                    del st.session_state[key]
-            st.rerun()
+    if st.button(" クリア"):
+        for key in ["question", "answer"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
