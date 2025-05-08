@@ -69,7 +69,6 @@ except HttpError as e:
 
 file_names = [f["name"] for f in pdf_files]
 selected_name = st.selectbox("📂 Google DriveのPDFファイルを選択", file_names)
-names)
 
 # --- ダウンロード関数 ---
 def download_pdf_from_drive(file_id, save_path):
