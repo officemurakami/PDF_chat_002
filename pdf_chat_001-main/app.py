@@ -33,11 +33,14 @@ API_KEY = os.getenv("API_KEY")
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key={API_KEY}"
 
 # --- Google Drive 認証 ---
-SERVICE_ACCOUNT_FILE = "service_account.json"
+import json
+
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES
+info = st.secrets["service_account"]
+credentials = service_account.Credentials.from_service_account_info(
+    json.loads(str(info)), scopes=SCOPES
 )
+
 drive_service = build("drive", "v3", credentials=credentials)
 
 # --- DriveからPDF一覧取得 ---
