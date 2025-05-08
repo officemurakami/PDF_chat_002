@@ -8,6 +8,7 @@ from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseDownload
 from dotenv import load_dotenv
 from googleapiclient.errors import HttpError
+import json
 
 # --- ページ設定とUI非表示 ---
 st.set_page_config(
@@ -33,8 +34,6 @@ API_KEY = os.getenv("API_KEY")
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key={API_KEY}"
 
 # --- Google Drive 認証 ---
-import json
-
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 info = st.secrets["service_account"]
 credentials = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
@@ -49,16 +48,8 @@ try:
     results = drive_service.files().list(q=query, fields="files(id, name)").execute()
     pdf_files = results.get("files", [])
 except HttpError as e:
-    st.error(f"\u274c Google Drive API エラーが発生しました：{e}")
+    st.error(f"❌ Google Drive API エラーが発生しました：{e}")
     st.stop()
-
-# --- 全PDFファイル名を表示 ---
-if not pdf_files:
-    st.warning("\ud83d\udcc2 フォルダー内にPDFが見つかりませんでした。")
-else:
-    st.markdown("### フォルダー内PDF一覧")
-    for f in pdf_files:
-        st.markdown(f"- {f['name']}")
 
 # --- テキスト抽出処理 ---
 def extract_text_from_drive_pdf(file_id):
@@ -77,28 +68,32 @@ def extract_text_from_drive_pdf(file_id):
 
 # --- 質問フォーム ---
 with st.form("qa_form"):
-    question = st.text_input("\u2753 質問を入力してください", value=st.session_state.get("question", ""))
-    submitted = st.form_submit_button(" 質問する")
+    question = st.text_input("❓ 質問を入力してください", value=st.session_state.get("question", ""))
+    submitted = st.form_submit_button("質問する")
 
     if submitted and question:
         st.session_state["question"] = question
         all_text = ""
-        for file in pdf_files:
-            file_id = file["id"]
-            file_name = file["name"]
-            try:
-                text = extract_text_from_drive_pdf(file_id)
-                all_text += f"\n--- {file_name} ---\n{text}\n"
-            except Exception as e:
-                st.warning(f"{file_name} の読み込み中にエラーが発生しました: {e}")
 
-        prompt = f"以下の社内文書を参考にして質問に答えてください。\n\n{all_text[:15000]}\n\nQ: {question}"
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        res = requests.post(GEMINI_URL, json=payload)
-        if res.status_code == 200:
-            st.session_state["answer"] = res.json()['candidates'][0]['content']['parts'][0]['text']
-        else:
-            st.session_state["answer"] = f"❌ Gemini APIエラー: {res.status_code}"
+        # --- スピナー表示 ---
+        with st.spinner("🔍 質問に対する回答を準備中です..."):
+            for file in pdf_files:
+                file_id = file["id"]
+                file_name = file["name"]
+                try:
+                    text = extract_text_from_drive_pdf(file_id)
+                    all_text += f"\n--- {file_name} ---\n{text}\n"
+                except Exception as e:
+                    st.warning(f"{file_name} の読み込み中にエラーが発生しました: {e}")
+
+            prompt = f"以下の社内文書を参考にして質問に答えてください。\n\n{all_text[:15000]}\n\nQ: {question}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            res = requests.post(GEMINI_URL, json=payload)
+
+            if res.status_code == 200:
+                st.session_state["answer"] = res.json()['candidates'][0]['content']['parts'][0]['text']
+            else:
+                st.session_state["answer"] = f"❌ Gemini APIエラー: {res.status_code}"
 
 # --- 回答表示 ---
 if st.session_state.get("answer") and st.session_state.get("question"):
@@ -107,11 +102,11 @@ if st.session_state.get("answer") and st.session_state.get("question"):
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button(" 回答クリア"):
+        if st.button("回答クリア"):
             st.session_state["answer"] = ""
             st.rerun()
     with col2:
-        if st.button(" 初期化（PDFは残す）"):
+        if st.button("初期化（PDFは残す）"):
             for key in ["question", "answer"]:
                 if key in st.session_state:
                     del st.session_state[key]
