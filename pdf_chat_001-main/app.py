@@ -78,7 +78,7 @@ def extract_text_from_drive_pdf(file_id):
 # --- 質問フォーム ---
 with st.form("qa_form"):
     question = st.text_input("\u2753 質問を入力してください", value=st.session_state.get("question", ""))
-    submitted = st.form_submit_button("\ud83d\udcac 質問する")
+    submitted = st.form_submit_button(" 質問する")
 
     if submitted and question:
         st.session_state["question"] = question
