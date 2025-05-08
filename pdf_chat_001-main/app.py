@@ -3,6 +3,7 @@ import requests
 import fitz  # PyMuPDF
 import os
 import io
+import json
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseDownload
@@ -28,15 +29,12 @@ st.markdown("""
 
 # --- 認証とAPIキー読み込み ---
 load_dotenv()
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("API_KEY") or st.secrets["API_KEY"]
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key={API_KEY}"
 
-# --- Google Drive 認証 ---
-SERVICE_ACCOUNT_FILE = "service_account.json"
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES
-)
+# --- Google Drive 認証（secrets.tomlから読込） ---
+SERVICE_ACCOUNT_INFO = st.secrets["service_account"]
+credentials = service_account.Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO)
 drive_service = build("drive", "v3", credentials=credentials)
 
 # --- PDFからテキスト抽出 ---
@@ -58,7 +56,7 @@ def ask_gemini_about_pdf(text, question):
         return f"\u274c エラー: {res.status_code} - {res.text}"
 
 # --- DriveからPDF一覧取得 ---
-FOLDER_ID = "1l7ux1L_YCMHY1Jt-AlLci88Bh3Fcv_-m"  # ★DriveのフォルダIDをここに設定
+FOLDER_ID = "YOUR_FOLDER_ID"  # ★DriveのフォルダIDをここに設定
 query = f"'{FOLDER_ID}' in parents and mimeType='application/pdf'"
 results = drive_service.files().list(q=query, fields="files(id, name)").execute()
 pdf_files = results.get("files", [])
