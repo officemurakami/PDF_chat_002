@@ -59,6 +59,21 @@ else:
     for f in pdf_files:
         st.markdown(f"- {f['name']}")
 
+# --- テキスト抽出処理 ---
+def extract_text_from_drive_pdf(file_id):
+    request = drive_service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+    fh.seek(0)
+    doc = fitz.open(stream=fh.read(), filetype="pdf")
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return text
+
 # --- 質問フォーム ---
 with st.form("qa_form"):
     question = st.text_input("\u2753 質問を入力してください", value=st.session_state.get("question", ""))
@@ -66,9 +81,23 @@ with st.form("qa_form"):
 
     if submitted and question:
         st.session_state["question"] = question
+        all_text = ""
+        for file in pdf_files:
+            file_id = file["id"]
+            file_name = file["name"]
+            try:
+                text = extract_text_from_drive_pdf(file_id)
+                all_text += f"\n--- {file_name} ---\n{text}\n"
+            except Exception as e:
+                st.warning(f"{file_name} の読み込み中にエラーが発生しました: {e}")
 
-        # --- 仮の応答処理（ここにGemini連携処理を入れる） ---
-        st.session_state["answer"] = f"（仮回答）『{question}』に対する応答です。"
+        prompt = f"以下の社内文書を参考にして質問に答えてください。\n\n{all_text[:15000]}\n\nQ: {question}"
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        res = requests.post(GEMINI_URL, json=payload)
+        if res.status_code == 200:
+            st.session_state["answer"] = res.json()['candidates'][0]['content']['parts'][0]['text']
+        else:
+            st.session_state["answer"] = f"❌ Gemini APIエラー: {res.status_code}"
 
 # --- 回答表示 ---
 if st.session_state.get("answer") and st.session_state.get("question"):
