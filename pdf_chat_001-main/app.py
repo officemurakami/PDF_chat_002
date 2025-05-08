@@ -56,7 +56,7 @@ def ask_gemini_about_pdf(text, question):
         return f"\u274c エラー: {res.status_code} - {res.text}"
 
 # --- DriveからPDF一覧取得 ---
-FOLDER_ID = "YOUR_FOLDER_ID"  # ★DriveのフォルダIDをここに設定
+FOLDER_ID = "1l7ux1L_YCMHY1Jt-AlLci88Bh3Fcv_-m"  # ★DriveのフォルダIDをここに設定
 query = f"'{FOLDER_ID}' in parents and mimeType='application/pdf'"
 results = drive_service.files().list(q=query, fields="files(id, name)").execute()
 pdf_files = results.get("files", [])
