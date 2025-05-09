@@ -37,11 +37,10 @@ GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pr
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 info = st.secrets["service_account"]
 credentials = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
-
 drive_service = build("drive", "v3", credentials=credentials)
 
 # --- DriveからPDF一覧取得 ---
-FOLDER_ID = "1l7ux1L_YCMHY1Jt-AlLci88Bh3Fcv_-m"  # ← あなたのフォルダID
+FOLDER_ID = "1l7ux1L_YCMHY1Jt-AlLci88Bh3Fcv_-m"  # ← あなたのフォルダIDに置き換えてください
 query = f"'{FOLDER_ID}' in parents and mimeType='application/pdf'"
 
 try:
@@ -75,7 +74,6 @@ with st.form("qa_form"):
         st.session_state["question"] = question
         all_text = ""
 
-        # --- スピナー表示 ---
         with st.spinner("🔍 質問に対する回答を準備中です..."):
             for file in pdf_files:
                 file_id = file["id"]
@@ -86,7 +84,16 @@ with st.form("qa_form"):
                 except Exception as e:
                     st.warning(f"{file_name} の読み込み中にエラーが発生しました: {e}")
 
-            prompt = f"以下の社内文書を参考にして質問に答えてください。\n\n{all_text[:15000]}\n\nQ: {question}"
+            # --- カスタムプロンプト ---
+            prompt = f"""以下の社内文書に基づいて、質問に明確・簡潔に回答してください。
+・箇条書きを使ってください。
+・回答に文書の具体的な引用があれば示してください。
+
+{all_text[:15000]}
+
+Q: {question}
+"""
+
             payload = {"contents": [{"parts": [{"text": prompt}]}]}
             res = requests.post(GEMINI_URL, json=payload)
 
