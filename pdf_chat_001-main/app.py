@@ -1,56 +1,51 @@
-import streamlit as st
-import requests
-import fitz  # PyMuPDF
+# pinecone_pdf_bot.py
+# Streamlit + Pinecone + OpenAI + Gemini を使ったPDF質問Bot（Google Drive連携）
+
 import os
 import io
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
-from googleapiclient.http import MediaIoBaseDownload
+import fitz
+import streamlit as st
+import pinecone
+import requests
 from dotenv import load_dotenv
-from googleapiclient.errors import HttpError
-import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import OpenAIEmbeddings
 
-# --- ページ設定とUI非表示 ---
-st.set_page_config(
-    page_title="業務分類QAボット (Drive連携)",
-    page_icon=None,
-    layout="wide",
-    initial_sidebar_state="collapsed",
-    menu_items={"Get Help": None, "Report a bug": None, "About": None}
-)
-
-st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    .viewerBadge_container__1QSob {display: none;}
-    </style>
-""", unsafe_allow_html=True)
-
-# --- 認証とAPIキー読み込み ---
+# --- 初期設定 ---
 load_dotenv()
-API_KEY = os.getenv("API_KEY")
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key={API_KEY}"
+st.set_page_config(page_title="PDF QA Bot", layout="wide")
+
+# --- APIキーなどの読み込み ---
+GEMINI_API_KEY = os.getenv("API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENV = os.getenv("PINECONE_ENV", "gcp-starter")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+FOLDER_ID = os.getenv("PDF_FOLDER_ID")
 
 # --- Google Drive 認証 ---
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-info = st.secrets["service_account"]
-credentials = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+info = {
+    "type": os.getenv("TYPE"),
+    "project_id": os.getenv("PROJECT_ID"),
+    "private_key_id": os.getenv("PRIVATE_KEY_ID"),
+    "private_key": os.getenv("PRIVATE_KEY").replace("\\n", "\n"),
+    "client_email": os.getenv("CLIENT_EMAIL"),
+    "client_id": os.getenv("CLIENT_ID"),
+    "auth_uri": os.getenv("AUTH_URI"),
+    "token_uri": os.getenv("TOKEN_URI"),
+    "auth_provider_x509_cert_url": os.getenv("AUTH_PROVIDER_X509_CERT_URL"),
+    "client_x509_cert_url": os.getenv("CLIENT_X509_CERT_URL")
+}
+credentials = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/drive.readonly"])
 drive_service = build("drive", "v3", credentials=credentials)
 
-# --- DriveからPDF一覧取得 ---
-FOLDER_ID = "1l7ux1L_YCMHY1Jt-AlLci88Bh3Fcv_-m"  # ← あなたのフォルダIDに置き換えてください
-query = f"'{FOLDER_ID}' in parents and mimeType='application/pdf'"
+# --- Pinecone 初期化 ---
+pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
+index = pinecone.Index("pdf-index")
 
-try:
-    results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-    pdf_files = results.get("files", [])
-except HttpError as e:
-    st.error(f"❌ Google Drive API エラーが発生しました：{e}")
-    st.stop()
-
-# --- テキスト抽出処理 ---
+# --- テキスト抽出関数（Drive PDF） ---
 def extract_text_from_drive_pdf(file_id):
     request = drive_service.files().get_media(fileId=file_id)
     fh = io.BytesIO()
@@ -60,55 +55,49 @@ def extract_text_from_drive_pdf(file_id):
         status, done = downloader.next_chunk()
     fh.seek(0)
     doc = fitz.open(stream=fh.read(), filetype="pdf")
-    text = ""
-    for page in doc:
-        text += page.get_text()
-    return text
+    return "\n".join([page.get_text() for page in doc])
 
-# --- 質問フォーム ---
-with st.form("qa_form"):
-    question = st.text_input("❓ 質問を入力してください", value=st.session_state.get("question", ""))
-    submitted = st.form_submit_button("質問する")
+# --- PDFのベクトル化＆Pinecone登録 ---
+def index_pdfs():
+    results = drive_service.files().list(q=f"'{FOLDER_ID}' in parents and mimeType='application/pdf'", fields="files(id, name)").execute()
+    files = results.get("files", [])
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    embedder = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 
-    if submitted and question:
-        st.session_state["question"] = question
-        all_text = ""
+    for file in files:
+        text = extract_text_from_drive_pdf(file["id"])
+        chunks = splitter.split_text(text)
+        vectors = embedder.embed_documents(chunks)
+        ids = [f"{file['name']}-{i}" for i in range(len(chunks))]
+        metadata = [{"text": chunk, "source": file["name"]} for chunk in chunks]
+        index.upsert(zip(ids, vectors, metadata))
 
-        with st.spinner("🔍 質問に対する回答を準備中です..."):
-            for file in pdf_files:
-                file_id = file["id"]
-                file_name = file["name"]
-                try:
-                    text = extract_text_from_drive_pdf(file_id)
-                    all_text += f"\n--- {file_name} ---\n{text}\n"
-                except Exception as e:
-                    st.warning(f"{file_name} の読み込み中にエラーが発生しました: {e}")
+# --- Geminiで回答生成 ---
+def query_gemini(context, question):
+    prompt = f"""以下の情報に基づいて質問に答えてください:\n\n{context}\n\n質問: {question}"""
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key={GEMINI_API_KEY}"
+    res = requests.post(url, json=payload)
+    if res.status_code == 200:
+        return res.json()['candidates'][0]['content']['parts'][0]['text']
+    else:
+        return f"❌ Gemini APIエラー: {res.status_code}"
 
-            # --- カスタムプロンプト ---
-            prompt = f"""以下の社内文書に基づいて、質問に明確・簡潔に回答してください。
-・箇条書きを使ってください。
-・回答に文書の具体的な引用があれば示してください。
+# --- UI ---
+st.title("📄 PDF Drive QA Bot (Pinecone連携)")
 
-{all_text[:15000]}
+if st.button("📥 Drive内のPDFをインデックス化"):
+    with st.spinner("PDFを読み込み、ベクトル化してPineconeに登録中..."):
+        index_pdfs()
+        st.success("✅ インデックス化完了")
 
-Q: {question}
-"""
-
-            payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            res = requests.post(GEMINI_URL, json=payload)
-
-            if res.status_code == 200:
-                st.session_state["answer"] = res.json()['candidates'][0]['content']['parts'][0]['text']
-            else:
-                st.session_state["answer"] = f"❌ Gemini APIエラー: {res.status_code}"
-
-# --- 回答表示 ---
-if st.session_state.get("answer") and st.session_state.get("question"):
-    st.markdown("### 回答：")
-    st.write(st.session_state["answer"])
-
-    if st.button(" クリア"):
-        for key in ["question", "answer"]:
-            if key in st.session_state:
-                del st.session_state[key]
-        st.rerun()
+question = st.text_input("❓ 質問を入力してください")
+if question:
+    embedder = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    query_vector = embedder.embed_query(question)
+    results = index.query(vector=query_vector, top_k=5, include_metadata=True)
+    context = "\n".join([match['metadata']['text'] for match in results['matches']])
+    with st.spinner("💬 Geminiに問い合わせ中..."):
+        answer = query_gemini(context, question)
+        st.markdown("### 回答")
+        st.write(answer)
