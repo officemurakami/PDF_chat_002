@@ -1,4 +1,4 @@
-# pinecone_pdf_bot.py
+# app.py
 # Streamlit + Pinecone + OpenAI + Gemini を使ったPDF質問Bot（Google Drive連携）
 
 import os
@@ -23,7 +23,7 @@ GEMINI_API_KEY = os.getenv("API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENV = os.getenv("PINECONE_ENV", "gcp-starter")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-FOLDER_ID = os.getenv("PDF_FOLDER_ID")
+PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")
 
 # --- Google Drive 認証 ---
 info = {
@@ -59,7 +59,7 @@ def extract_text_from_drive_pdf(file_id):
 
 # --- PDFのベクトル化＆Pinecone登録 ---
 def index_pdfs():
-    results = drive_service.files().list(q=f"'{FOLDER_ID}' in parents and mimeType='application/pdf'", fields="files(id, name)").execute()
+    results = drive_service.files().list(q=f"'{PDF_FOLDER_ID}' in parents and mimeType='application/pdf'", fields="files(id, name)").execute()
     files = results.get("files", [])
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
     embedder = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
