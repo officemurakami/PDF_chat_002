@@ -25,6 +25,23 @@ PINECONE_ENV = os.getenv("PINECONE_ENV", "gcp-starter")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")
 
+# --- 環境変数チェック ---
+if not PINECONE_API_KEY or not PINECONE_ENV:
+    st.error("❌ PineconeのAPIキーまたは環境名が未設定です。Secretsや.envを確認してください。")
+    st.stop()
+
+if not OPENAI_API_KEY:
+    st.error("❌ OpenAI APIキーが未設定です。")
+    st.stop()
+
+if not GEMINI_API_KEY:
+    st.error("❌ Gemini APIキーが未設定です。")
+    st.stop()
+
+if not PDF_FOLDER_ID:
+    st.error("❌ PDFフォルダIDが未設定です。")
+    st.stop()
+
 # --- Google Drive 認証 ---
 info = {
     "type": os.getenv("TYPE"),
@@ -43,6 +60,10 @@ drive_service = build("drive", "v3", credentials=credentials)
 
 # --- Pinecone 初期化 ---
 pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
+
+if "pdf-index" not in pinecone.list_indexes():
+    pinecone.create_index("pdf-index", dimension=1536)
+
 index = pinecone.Index("pdf-index")
 
 # --- テキスト抽出関数（Drive PDF） ---
@@ -66,6 +87,9 @@ def index_pdfs():
 
     for file in files:
         text = extract_text_from_drive_pdf(file["id"])
+        if not text.strip():
+            st.warning(f"⚠ 空のPDF ({file['name']}) はスキップしました。")
+            continue
         chunks = splitter.split_text(text)
         vectors = embedder.embed_documents(chunks)
         ids = [f"{file['name']}-{i}" for i in range(len(chunks))]
@@ -78,13 +102,17 @@ def query_gemini(context, question):
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key={GEMINI_API_KEY}"
     res = requests.post(url, json=payload)
-    if res.status_code == 200:
+    try:
         return res.json()['candidates'][0]['content']['parts'][0]['text']
-    else:
-        return f"❌ Gemini APIエラー: {res.status_code}"
+    except Exception:
+        return f"❌ Gemini APIのレスポンス解析に失敗しました: {res.text}"
 
 # --- UI ---
 st.title("📄 PDF Drive QA Bot (Pinecone連携)")
+
+st.write("🔧 Pinecone 初期化済み")
+st.write("🗂 PDFフォルダID:", PDF_FOLDER_ID)
+st.write("🔑 Pinecone環境:", PINECONE_ENV)
 
 if st.button("📥 Drive内のPDFをインデックス化"):
     with st.spinner("PDFを読み込み、ベクトル化してPineconeに登録中..."):
