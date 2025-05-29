@@ -7,7 +7,6 @@ import fitz
 import streamlit as st
 import pinecone
 import requests
-from dotenv import load_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -15,45 +14,27 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
 
 # --- 初期設定 ---
-load_dotenv()
 st.set_page_config(page_title="PDF QA Bot", layout="wide")
 
-# --- APIキーなどの読み込み ---
-GEMINI_API_KEY = os.getenv("API_KEY")
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_ENV = os.getenv("PINECONE_ENV", "gcp-starter")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")
+# --- Secretsから読み込み ---
+GEMINI_API_KEY = st.secrets["API_KEY"]
+PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
+PINECONE_ENV = st.secrets["PINECONE_ENV"]
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+PDF_FOLDER_ID = st.secrets["PDF_FOLDER_ID"]
 
-# --- 環境変数チェック ---
-if not PINECONE_API_KEY or not PINECONE_ENV:
-    st.error("❌ PineconeのAPIキーまたは環境名が未設定です。Secretsや.envを確認してください。")
-    st.stop()
-
-if not OPENAI_API_KEY:
-    st.error("❌ OpenAI APIキーが未設定です。")
-    st.stop()
-
-if not GEMINI_API_KEY:
-    st.error("❌ Gemini APIキーが未設定です。")
-    st.stop()
-
-if not PDF_FOLDER_ID:
-    st.error("❌ PDFフォルダIDが未設定です。")
-    st.stop()
-
-# --- Google Drive 認証 ---
+# --- Google 認証情報（Secretsのservice_accountから取得） ---
 info = {
-    "type": os.getenv("TYPE"),
-    "project_id": os.getenv("PROJECT_ID"),
-    "private_key_id": os.getenv("PRIVATE_KEY_ID"),
-    "private_key": os.getenv("PRIVATE_KEY").replace("\\n", "\n"),
-    "client_email": os.getenv("CLIENT_EMAIL"),
-    "client_id": os.getenv("CLIENT_ID"),
-    "auth_uri": os.getenv("AUTH_URI"),
-    "token_uri": os.getenv("TOKEN_URI"),
-    "auth_provider_x509_cert_url": os.getenv("AUTH_PROVIDER_X509_CERT_URL"),
-    "client_x509_cert_url": os.getenv("CLIENT_X509_CERT_URL")
+    "type": st.secrets["service_account"]["type"],
+    "project_id": st.secrets["service_account"]["project_id"],
+    "private_key_id": st.secrets["service_account"]["private_key_id"],
+    "private_key": st.secrets["service_account"]["private_key"],
+    "client_email": st.secrets["service_account"]["client_email"],
+    "client_id": st.secrets["service_account"]["client_id"],
+    "auth_uri": st.secrets["service_account"]["auth_uri"],
+    "token_uri": st.secrets["service_account"]["token_uri"],
+    "auth_provider_x509_cert_url": st.secrets["service_account"]["auth_provider_x509_cert_url"],
+    "client_x509_cert_url": st.secrets["service_account"]["client_x509_cert_url"]
 }
 credentials = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/drive.readonly"])
 drive_service = build("drive", "v3", credentials=credentials)
@@ -109,10 +90,6 @@ def query_gemini(context, question):
 
 # --- UI ---
 st.title("📄 PDF Drive QA Bot (Pinecone連携)")
-
-st.write("🔧 Pinecone 初期化済み")
-st.write("🗂 PDFフォルダID:", PDF_FOLDER_ID)
-st.write("🔑 Pinecone環境:", PINECONE_ENV)
 
 if st.button("📥 Drive内のPDFをインデックス化"):
     with st.spinner("PDFを読み込み、ベクトル化してPineconeに登録中..."):
