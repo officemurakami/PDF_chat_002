@@ -1,17 +1,17 @@
 # app.py
-# 税理士事務所向け：Streamlit + Google Drive + Pinecone + Gemini を用いたPDF質問Bot
+# 税理士事務所向け：Streamlit + Google Drive + Pinecone v3 + Gemini を用いたPDF質問Bot
 
 import os
 import io
 import fitz  # PyMuPDF
 import streamlit as st
-import pinecone
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
+from pinecone import Pinecone, ServerlessSpec
 
 # --- 初期設定 ---
 st.set_page_config(page_title="税理士事務所向け PDF QA Bot", layout="wide")
@@ -28,11 +28,16 @@ info = st.secrets["service_account"]
 credentials = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/drive.readonly"])
 drive_service = build("drive", "v3", credentials=credentials)
 
-# --- Pinecone 初期化 ---
-pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
-if "pdf-index" not in pinecone.list_indexes():
-    pinecone.create_index("pdf-index", dimension=1536)
-index = pinecone.Index("pdf-index")
+# --- Pinecone 初期化（v3） ---
+pc = Pinecone(api_key=PINECONE_API_KEY)
+if "pdf-index" not in pc.list_indexes().names():
+    pc.create_index(
+        name="pdf-index",
+        dimension=1536,
+        metric="cosine",
+        spec=ServerlessSpec(cloud="aws", region="us-west-2")  # 必要に応じて変更
+    )
+index = pc.Index("pdf-index")
 
 # --- テキスト抽出 ---
 def extract_text_from_drive_pdf(file_id):
@@ -52,7 +57,7 @@ def index_pdfs():
     files = results.get("files", [])
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
     embedder = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    
+
     for file in files:
         file_id = file["id"]
         file_name = file["name"]
