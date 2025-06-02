@@ -13,18 +13,28 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
 from pinecone import Pinecone, ServerlessSpec
 
-# --- 初期設定 ---
+# --- バージョン確認（sidebarに表示） ---
+import langchain
+import openai
+st.sidebar.markdown(f"🧪 Langchain: {langchain.__version__}")
+st.sidebar.markdown(f"🧪 OpenAI: {openai.__version__}")
+
+# --- ページ設定 ---
 st.set_page_config(page_title="税理士事務所向け PDF QA Bot", layout="wide")
 
-# --- Secretsから読み込み ---
-GEMINI_API_KEY = st.secrets["API_KEY"]
-PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
-PINECONE_ENV = st.secrets["PINECONE_ENV"]
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-PDF_FOLDER_ID = st.secrets["PDF_FOLDER_ID"]
+# --- Secrets読み込み（エラーハンドリング付き） ---
+try:
+    GEMINI_API_KEY = st.secrets["API_KEY"]
+    PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
+    PINECONE_ENV = st.secrets["PINECONE_ENV"]
+    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+    PDF_FOLDER_ID = st.secrets["PDF_FOLDER_ID"]
+    info = st.secrets["service_account"]
+except Exception as e:
+    st.error("❌ secrets.toml に必要な設定が見つかりません。")
+    st.stop()
 
-# --- Google 認証情報 ---
-info = st.secrets["service_account"]
+# --- Google Drive API 認証 ---
 credentials = service_account.Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/drive.readonly"])
 drive_service = build("drive", "v3", credentials=credentials)
 
@@ -35,11 +45,11 @@ if "pdf-index" not in pc.list_indexes().names():
         name="pdf-index",
         dimension=1536,
         metric="cosine",
-        spec=ServerlessSpec(cloud="aws", region="us-west-2")  # 必要に応じて変更
+        spec=ServerlessSpec(cloud="aws", region="us-west-2")  # 地域は適宜調整
     )
 index = pc.Index("pdf-index")
 
-# --- テキスト抽出 ---
+# --- Drive PDF → テキスト抽出 ---
 def extract_text_from_drive_pdf(file_id):
     request = drive_service.files().get_media(fileId=file_id)
     fh = io.BytesIO()
@@ -51,7 +61,7 @@ def extract_text_from_drive_pdf(file_id):
     doc = fitz.open(stream=fh.read(), filetype="pdf")
     return "\n".join([page.get_text() for page in doc])
 
-# --- PDFのインデックス化 ---
+# --- PDFファイルのインデックス化処理 ---
 def index_pdfs():
     results = drive_service.files().list(q=f"'{PDF_FOLDER_ID}' in parents and mimeType='application/pdf'", fields="files(id, name)").execute()
     files = results.get("files", [])
@@ -71,7 +81,7 @@ def index_pdfs():
         metadata = [{"text": chunk, "source": file_name} for chunk in chunks]
         index.upsert(vectors=zip(ids, vectors, metadata))
 
-# --- Geminiで回答生成 ---
+# --- Geminiでの応答生成 ---
 def query_gemini(context, question):
     prompt = f"""以下の税務関連資料に基づいて質問に答えてください:\n\n{context}\n\n質問: {question}"""
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -82,7 +92,7 @@ def query_gemini(context, question):
     except Exception:
         return f"❌ Gemini APIのレスポンス解析に失敗しました: {res.text}"
 
-# --- UI ---
+# --- Streamlit UI ---
 st.title("🧾 税理士事務所向け PDF QA Bot")
 
 if st.button("📥 DriveのPDFをインデックス化"):
