@@ -8,4 +8,6 @@ google-auth-oauthlib
 langchain>=0.1.0
 openai>=1.10.0
 pinecone-client
+# 以下どれか1つ変更（空行追加でも可）
 tiktoken
+# dummy update to force rebuild
